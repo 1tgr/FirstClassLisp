@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <meta charset='utf-8' />
+    <meta http-equiv="X-UA-Compatible" content="chrome=1" />
+    <meta name="description" content="First Class Lisp : A Lisp interpreter written in C# with first class macros and continuations" />
+
+    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
+
+    <title>First Class Lisp</title>
+  </head>
+
+  <body>
+
+    <!-- HEADER -->
+    <div id="header_wrap" class="outer">
+        <header class="inner">
+          <a id="forkme_banner" href="https://github.com/Patient0/FirstClassLisp">View on GitHub</a>
+
+          <h1 id="project_title">First Class Lisp</h1>
+          <h2 id="project_tagline">A Lisp interpreter written in C# with first class macros and continuations</h2>
+
+            <section id="downloads">
+              <a class="zip_download_link" href="https://github.com/Patient0/FirstClassLisp/zipball/master">Download this project as a .zip file</a>
+              <a class="tar_download_link" href="https://github.com/Patient0/FirstClassLisp/tarball/master">Download this project as a tar.gz file</a>
+            </section>
+        </header>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div id="main_content_wrap" class="outer">
+      <section id="main_content" class="inner">
+        <h3>First Class Lisp</h3>
+
+<p>First Class Lisp is a 'toy' Lisp interpreter written in C#.</p>
+
+<p>It's main features are:</p>
+
+<ul>
+<li>Pattern matching lambda</li>
+<li>First class macros</li>
+<li>First class continuations</li>
+<li>Properly tail recursive</li>
+</ul><h3>Pattern-matching lambda</h3>
+
+<p>In my previous experiences writing Scheme code, I ended up doing this a lot:</p>
+
+<pre><code>(cond ((pair? x)
+       (let ((head (car x)
+           tail (cdr x))
+          (do-something with head and tail)))
+      (#t (do-the-default-thing)))
+</code></pre>
+
+<p>It's quite tedious - you go to all the trouble of checking if something is a pair, only to have to do it again to 'extract' out the bits that you want.</p>
+
+<p>At the same time, to implement even the standard 'lambda' argument syntax, you have to support all of:</p>
+
+<pre><code>(lambda x ...) ' list args
+(lambda (a b) ...) ' positional args
+(lambda (a b . c) ...) ' some combination
+</code></pre>
+
+<p>By the time you've implemented these three cases and written error handling code, it's arguably no more complicated to add the vastly more powerful pattern matching and 'case lambda' support.</p>
+
+<p>I was really happy with the results. For example, the quasiquote macro was vastly simpler to write:</p>
+
+<pre><code>(define expand-quasiquote
+    (lambda
+        (('unquote e))
+            e
+        ((('unquote-splicing x) . y))
+            (list append x (expand-quasiquote y))
+        ((x . y))
+            (list cons (expand-quasiquote x) (expand-quasiquote y))
+        x
+            (cons quote x)))
+(define quasiquote
+    (macro expand-quasiquote))
+</code></pre>
+
+<h3>Why first class macros?</h3>
+
+<p>I wanted to have macros in my Lisp interpreter - but I didn't want to implement fully-fledged Scheme hygienic macros ("syntax-rules"), which I still find difficult to understand, let alone implement!</p>
+
+<p>First class macros provided an easy but elegant way to solve the "hygiene" problem.</p>
+
+<p>In a conventional lisp you might define, say, a "let" macro as follows:</p>
+
+<pre><code>(define-macro let (var value body)
+    `(lambda (,var) ,body) ,value))
+</code></pre>
+
+<p>This would expand:</p>
+
+<pre><code>(let x 5 (* x x))
+</code></pre>
+
+<p>into</p>
+
+<pre><code>((lambda (x) (* x x) 5)
+</code></pre>
+
+<p>This can cause problems though in that we are relying on 'lambda' not having some alternative meaning in the scope in which the let statement was expanded</p>
+
+<pre><code>(define (energy lambda)
+ (with (c speed-of-light
+        h plancks-constant)
+  (/ (* c h) lambda)))
+</code></pre>
+
+<p>I got the above example from <a href="http://matt.might.net/articles/metacircular-evaluation-and-first-class-run-time-macros/">Matt Might's page on first class macros</a> which I found to be very interesting reading on all of this. In fact, Matt's page was my original inspiration for implementing macros this way.</p>
+
+<p>In First Class Lisp, the 'let' macro is very similar to the one I described earlier, but with one small change:</p>
+
+<pre><code>(define-macro let (var value body)
+    `(,lambda (,var) ,body) ,value))
+</code></pre>
+
+<p>See the "," before lambda? This is how we solve the hygiene problem: we are unquoting 'lambda' to evaluate it in the environment of the macro expansion rather than the 'calling' context.</p>
+
+<p>This is made possible by the fact that <em>all</em> 'special forms' are actually just <a href="http://en.wikipedia.org/wiki/Fexpr">fexprs</a> defined in the current lexical environment. Our macros are just special cases of these f-expressions (except macros do not have access to the environment itself to perform their expansion).</p>
+
+<p>Because all of these objects are mapped to names in the current environment, they can be passed and returned from functions like ordinary objects:</p>
+
+<pre><code>(with (identity (lambda (x) x))
+           ((identity let) x 3
+                (* x x)))
+</code></pre>
+
+<p>My Lisp interpreter doesn't currently let you define your own f-expressions - only your own macros. Also, 'apply', in my Lisp interpreter, is a normal function - it doesn't work with macros or f-expressions. One could enhance it to support this, but this would mean that 'apply' itself could no longer be a function... I wasn't sure if I wanted to go all the way in this direction.</p>
+
+<p>However, for an example of someone who <em>has</em> gone all the way down the rabbit-hole in this direction, I recommend checking out this article about <a href="http://mainisusuallyafunction.blogspot.co.uk/2012/04/scheme-without-special-forms.html">Kernel</a>.</p>
+
+<p>So, that might be the next interesting project: Change "First Class Lisp" to be a .Net "Kernel" interpreter.</p>
+
+<h3>First class continuations</h3>
+
+<p>The simplest way to implement an interpreter is to recursively visit the expression-tree, collecting
+up the terms.</p>
+
+<p>For example, to implement some sort of arithmetic expression evaluator, you'd usually do something like this:</p>
+
+<pre><code>interface IExpression
+{
+    double evaluate(Environment e);
+}
+
+class Multiply : IExpression
+{
+    IExpression left;
+    IExpression right;
+    public double evaluate(Environment e)
+    {
+        return left.evaluate(e) * right.evaluate(e);
+    }
+}
+</code></pre>
+
+<p>In fact, if you look at the GitHub history, you'll see that I started First Class Lisp in this exact way. It's very simple because you are using the implicit runtime stack to keep track of 'where you are'.</p>
+
+<p>Although it's simple, there are two disadvantages to the implicit approach:</p>
+
+<ol>
+<li>Properly 'tail recursive' programs in Lisp ideally should be able to loop in constant space. The implicit approach, however, will encounter stack overflow errors.</li>
+<li>You can't implement proper continuations which are implemented as pure 'first class' objects.</li>
+</ol><p>To resolve these issues, my approach was to use two "stacks" to keep track of the current interpreter state:</p>
+
+<ol>
+<li>A stack of 'tasks' that still need to be performed</li>
+<li>A stack of results which have been calculated</li>
+</ol><p>We start by pushing the task 'evaluate the expression' on the stack. We then repeatedly pull the top
+'task' off the stack and execute it, until there are no more tasks. Once a 'task' has been fully evaluated, the result should be on the result stack. The trick is, the evaluation of a task can trigger <em>further</em> tasks to be evaluated, and intermediate results can be pushed onto the result stack in the mean time.</p>
+
+<p>The approach is essentially the same as the <a href="http://en.wikipedia.org/wiki/Shunting-yard_algorithm">Shunting Yard Algorithm</a>.</p>
+
+<p>To implement first-class continuations efficiently, only one other thing was required: which was to make the entire structure of both stacks <em>immutable</em>:</p>
+
+<pre><code>    public interface Continuation
+    {
+        Continuation PushTask(Task task);
+        Continuation PopTask();
+        Continuation PushResult(Datum d);
+        Continuation PopResult();
+        // The current task
+        Task Task { get; }
+        // The current result
+        Datum Result { get; }
+    }
+</code></pre>
+
+<p>This made it safe to pass the structure around, keep it as a variable and so on.</p>
+
+<p>To 'prove' that it all works: I adapted <a href="http://matt.might.net/articles/programming-with-continuations--exceptions-backtracking-search-threads-generators-coroutines/">Matt Might's implementation of the 'amb' operator</a> and implemented it inside First Class Lisp:</p>
+
+<pre><code>(ambTest (4 3 5)
+    (begin
+        ; '404' for no solutions found. Haven't implemented
+        ; string literals so can't report anything else!!
+        (define error (lambda () 404))
+        (define env (make-amb-environment error))
+        (with (a (env 'amb '(1 2 3 4 5 6 7))
+               b (env 'amb '(1 2 3 4 5 6 7))
+               c (env 'amb '(1 2 3 4 5 6 7)))
+
+            (begin
+                ; We only want pythagorean triples
+                (env 'assert (eq? (* c c) (+ (* a a) (* b b))))
+                ; And only those with the second value less
+                ; than the first.
+                (env 'assert (&lt;  b a))
+                (log (list a b c))))))
+</code></pre>
+
+<h3>Conclusion</h3>
+
+<p>I have to say I've really enjoyed working on this project! I've particularly liked the experience of working with macros. Being able to write a macro any time I found myself writing some boiler plate code has been a trully addictive experience. I think I am getting hooked on Lisp!</p>
+
+<p>I'd welcome any feedback or suggestions.</p>
+
+<p>Feel free to make a fork of this repository to add your own enhancements or use this as the basis for some other cool project.</p>
+      </section>
+    </div>
+
+    <!-- FOOTER  -->
+    <div id="footer_wrap" class="outer">
+      <footer class="inner">
+        <p class="copyright">First Class Lisp maintained by <a href="https://github.com/Patient0">Patient0</a></p>
+        <p>Published with <a href="http://pages.github.com">GitHub Pages</a></p>
+      </footer>
+    </div>
+
+    
+
+  </body>
+</html>
